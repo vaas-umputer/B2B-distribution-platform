@@ -1,0 +1,16 @@
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+out/
+*.class
+
+.idea/
+*.iml
+.vscode/
+
+.DS_Store
+.claude/
+
+docker-compose.override.local.yml
+
+*.log

@@ -1,0 +1,105 @@
+### Phase 1 walking-skeleton smoke test.
+### Works with VS Code's "REST Client" extension or IntelliJ's built-in HTTP client:
+### run requests top to bottom - each one captures a variable the next one needs.
+### Assumes `docker compose up` is running (or each service via `./gradlew bootRun` locally).
+
+@tenantBaseUrl = http://localhost:8081
+@orderBaseUrl = http://localhost:8082
+
+
+### 1. Onboard a tenant. No auth required - this is how an identity is created
+### in the first place.
+# @name onboard
+POST {{tenantBaseUrl}}/tenants
+Content-Type: application/json
+
+{
+  "name": "Acme Distributors"
+}
+
+###
+
+@tenantId = {{onboard.response.body.id}}
+
+
+### 2. Log in as that tenant. Phase 1 simplification: no password yet, just
+### prove you know an onboarded tenant id (see LoginRequest's Javadoc).
+# @name login
+POST {{tenantBaseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "tenantId": "{{tenantId}}"
+}
+
+###
+
+@token = {{login.response.body.token}}
+
+
+### 3. Confirm the token works against Tenant Service itself.
+GET {{tenantBaseUrl}}/tenants/{{tenantId}}
+Authorization: Bearer {{token}}
+
+###
+
+
+### 4. Fetch the (hardcoded, Phase 1) catalog.
+GET {{tenantBaseUrl}}/catalog/{{tenantId}}
+Authorization: Bearer {{token}}
+
+###
+
+
+### 5. Happy path: place an order. This is the saga's main event - watch
+### `docker compose logs -f order-inventory-service credit-service invoice-service`
+### while running this to see the same X-Correlation-Id thread through all
+### three services, and the order progress PLACED -> CREDIT_LOCKED ->
+### STOCK_RESERVED -> COMPLETED.
+### Expect: 201, status COMPLETED, a non-null invoiceId.
+POST {{orderBaseUrl}}/orders
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "items": [
+    { "sku": "SKU-001", "qty": 2, "unitPrice": 4500.00 }
+  ]
+}
+
+###
+
+
+### 6. Forced failure + compensation: simulateStockFailure=true always fails
+### the (stubbed) stock check after credit has already been locked, forcing
+### the saga's one Phase 1 compensating action: releasing that credit lock.
+### Expect: 422, status STOCK_REJECTED, invoiceId null.
+### Verify the compensation actually ran with:
+###   docker exec <postgres-container> psql -U postgres -d credit_db \
+###     -c "SELECT order_id, status FROM credit_locks ORDER BY created_at;"
+### - the lock for THIS order should show RELEASED, not LOCKED.
+POST {{orderBaseUrl}}/orders?simulateStockFailure=true
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "items": [
+    { "sku": "SKU-002", "qty": 5, "unitPrice": 380.00 }
+  ]
+}
+
+###
+
+
+### 7. Same request without a token - every endpoint except onboarding and
+### login requires one. Expect: 403.
+POST {{orderBaseUrl}}/orders
+Content-Type: application/json
+
+{
+  "items": [
+    { "sku": "SKU-001", "qty": 1, "unitPrice": 4500.00 }
+  ]
+}
+
+###

@@ -1,0 +1,41 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: credit-service
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:credit_db}
+    username: ${DB_USER:app_user}
+    password: ${DB_PASSWORD:app_user}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+
+system:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:credit_db}
+    username: ${SYSTEM_DB_USER:svc_system}
+    password: ${SYSTEM_DB_PASSWORD:svc_system}
+
+credit:
+  new-agent-ceiling: ${NEW_AGENT_CEILING:1500000}
+  near-limit-alert:
+    cron: ${NEAR_LIMIT_ALERT_CRON:0 */15 * * * *}
+  monthly-review:
+    cron: ${MONTHLY_REVIEW_CRON:0 0 0 1 * *}
+
+jwt:
+  secret: ${JWT_SECRET:phase1-dev-only-shared-signing-secret-CHANGE-ME-before-prod}
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%X{correlationId}] %-5level %logger{36} - %msg%n"

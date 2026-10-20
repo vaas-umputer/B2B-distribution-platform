@@ -1,0 +1,108 @@
+@gateway = http://localhost:8080/api
+@adminUsername = admin
+@adminPassword = admin-dev-secret-CHANGE-ME
+
+### 1. Onboard a dealer. Copy `id` from the response into @tenantId below.
+POST {{gateway}}/tenants
+Content-Type: application/json
+
+{ "name": "Acme Builders" }
+
+### Set this to the id returned by the onboarding request.
+@tenantId = REPLACE_WITH_TENANT_UUID
+
+### 2. Dealer login. Copy token into @tenantToken.
+POST {{gateway}}/auth/login
+Content-Type: application/json
+
+{ "tenantId": "{{tenantId}}" }
+
+@tenantToken = REPLACE_WITH_DEALER_JWT
+
+### 3. Admin login. Copy token into @adminToken.
+POST {{gateway}}/auth/admin-login
+Content-Type: application/json
+
+{ "username": "{{adminUsername}}", "password": "{{adminPassword}}" }
+
+@adminToken = REPLACE_WITH_ADMIN_JWT
+
+### 4. Dealer catalog
+GET {{gateway}}/catalog/{{tenantId}}
+Authorization: Bearer {{tenantToken}}
+
+### 5. Provision demo credit (existing Phase 2 setup endpoint)
+POST {{gateway}}/credit/{{tenantId}}/accounts
+Authorization: Bearer {{tenantToken}}
+Content-Type: application/json
+
+{ "creditLimit": 100000 }
+
+### 6. Dealer submits a limit increase request
+POST {{gateway}}/credit/{{tenantId}}/limit-increase-requests
+Authorization: Bearer {{tenantToken}}
+Content-Type: application/json
+
+{ "requestedAmount": 150000, "reason": "Seasonal construction demand" }
+
+### 7. Admin views the pending queue. Copy its `id` into @requestId.
+GET {{gateway}}/admin/limit-increase-requests?status=PENDING
+Authorization: Bearer {{adminToken}}
+
+@requestId = REPLACE_WITH_REQUEST_UUID
+
+### 8. Admin approves; this writes the unified credit override audit row.
+POST {{gateway}}/admin/limit-increase-requests/{{requestId}}/approve
+Authorization: Bearer {{adminToken}}
+
+### 9. Admin manual override (must not be below current outstanding).
+PATCH {{gateway}}/credit/{{tenantId}}/limit
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "newLimit": 175000, "overrideReason": "Approved after payment history review" }
+
+### 10. Dealer places an order; copy invoiceId into @invoiceId.
+POST {{gateway}}/orders
+Authorization: Bearer {{tenantToken}}
+Idempotency-Key: demo-order-001
+Content-Type: application/json
+
+{ "items": [{ "sku": "SKU-001", "qty": 2, "unitPrice": 4500.00 }] }
+
+@invoiceId = REPLACE_WITH_INVOICE_UUID
+
+### 11. Dealer sees orders and invoices.
+GET {{gateway}}/orders
+Authorization: Bearer {{tenantToken}}
+
+###
+GET {{gateway}}/invoices
+Authorization: Bearer {{tenantToken}}
+
+### 12. Mark the invoice paid; Credit consumes its event and releases exposure.
+POST {{gateway}}/invoices/{{invoiceId}}/mark-paid
+Authorization: Bearer {{tenantToken}}
+
+### 13. Admin dashboard API calls.
+GET {{gateway}}/admin/utilization
+Authorization: Bearer {{adminToken}}
+
+###
+GET {{gateway}}/admin/alerts
+Authorization: Bearer {{adminToken}}
+
+###
+GET {{gateway}}/admin/reports/monthly/latest
+Authorization: Bearer {{adminToken}}
+
+### 14. Rejection path: submit then reject a second request.
+POST {{gateway}}/credit/{{tenantId}}/limit-increase-requests
+Authorization: Bearer {{tenantToken}}
+Content-Type: application/json
+
+{ "requestedAmount": 200000, "reason": "Example rejection path" }
+
+### Fetch its id from the queue, set @requestId, then:
+POST {{gateway}}/admin/limit-increase-requests/{{requestId}}/reject
+Authorization: Bearer {{adminToken}}

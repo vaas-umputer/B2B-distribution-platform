@@ -1,0 +1,35 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: tenant-catalog-service
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:tenant_db}
+    username: ${DB_USER:app_user}
+    password: ${DB_PASSWORD:app_user}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate # schema is owned by Flyway migrations, not Hibernate - this only checks the two agree
+  flyway:
+    enabled: true
+
+jwt:
+  secret: ${JWT_SECRET:phase1-dev-only-shared-signing-secret-CHANGE-ME-before-prod}
+
+admin:
+  username: ${ADMIN_USERNAME:admin}
+  password: ${ADMIN_PASSWORD:admin-dev-secret-CHANGE-ME}
+
+document-storage:
+  local-path: ${DOCUMENT_STORAGE_LOCAL_PATH:uploads}
+
+system:
+  datasource:
+    username: ${SYSTEM_DB_USER:svc_system}
+    password: ${SYSTEM_DB_PASSWORD:svc_system}
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%X{correlationId}] %-5level %logger{36} - %msg%n"

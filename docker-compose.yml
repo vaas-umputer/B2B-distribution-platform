@@ -1,0 +1,142 @@
+name: b2b-distribution-platform
+
+# Phase 1 adds the 4 real services, each pointed at this same stack by
+# container hostname (Compose's built-in DNS resolves "postgres",
+# "credit-service", etc. by service name, so no service-discovery layer is
+# needed - see the plan's trade-off #4). A thin gateway is deliberately not
+# here yet (Phase 4/5): each service exposes its own port directly.
+#
+# One command, no host JDK needed:
+#   docker compose up --build
+# Each service's Dockerfile is a multi-stage build - it compiles the whole
+# Gradle multi-module project INSIDE a builder stage (hence `context: .`,
+# the repo root, not each service's own folder) and keeps only the
+# resulting jar + a JRE in the final image.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # management UI
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  tenant-catalog-service:
+    build:
+      context: .
+      dockerfile: tenant-catalog-service/Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      DB_HOST: postgres
+      DB_NAME: tenant_db
+      JWT_SECRET: ${JWT_SECRET:-phase1-dev-only-shared-signing-secret-CHANGE-ME-before-prod}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  order-inventory-service:
+    build:
+      context: .
+      dockerfile: order-inventory-service/Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      DB_HOST: postgres
+      DB_NAME: order_db
+      JWT_SECRET: ${JWT_SECRET:-phase1-dev-only-shared-signing-secret-CHANGE-ME-before-prod}
+      CREDIT_SERVICE_URL: http://credit-service:8083
+      INVOICE_SERVICE_URL: http://invoice-service:8084
+      RABBITMQ_HOST: rabbitmq
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  credit-service:
+    build:
+      context: .
+      dockerfile: credit-service/Dockerfile
+    ports:
+      - "8083:8083"
+    environment:
+      DB_HOST: postgres
+      DB_NAME: credit_db
+      JWT_SECRET: ${JWT_SECRET:-phase1-dev-only-shared-signing-secret-CHANGE-ME-before-prod}
+      RABBITMQ_HOST: rabbitmq
+      # Demo-friendly overrides: don't make a manual test wait 15 minutes /
+      # until the 1st of the month to see the scheduled jobs fire.
+      NEAR_LIMIT_ALERT_CRON: ${NEAR_LIMIT_ALERT_CRON:-0 */15 * * * *}
+      MONTHLY_REVIEW_CRON: ${MONTHLY_REVIEW_CRON:-0 0 0 1 * *}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  invoice-service:
+    build:
+      context: .
+      dockerfile: invoice-service/Dockerfile
+    ports:
+      - "8084:8084"
+    environment:
+      DB_HOST: postgres
+      DB_NAME: invoice_db
+      JWT_SECRET: ${JWT_SECRET:-phase1-dev-only-shared-signing-secret-CHANGE-ME-before-prod}
+      RABBITMQ_HOST: rabbitmq
+      OVERDUE_SWEEP_CRON: ${OVERDUE_SWEEP_CRON:-0 0 2 * * *}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      - tenant-catalog-service
+      - order-inventory-service
+      - credit-service
+      - invoice-service
+
+volumes:
+  postgres-data:
+  mongo-data:
