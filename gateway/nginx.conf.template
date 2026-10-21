@@ -26,6 +26,15 @@ server {
   set $credit ${CREDIT_URL};
   set $invoices ${INVOICES_URL};
   proxy_ssl_server_name on; # required for SNI when an upstream URL is https (e.g. Render); a no-op for plain http
+  # nginx's default proxy timeouts (60s) are shorter than a free-tier
+  # Render backend's cold-start time after spinning down from inactivity -
+  # measured 48-79s for a genuinely healthy service that was just asleep.
+  # Without this, the very first request after idle time 502s even though
+  # everything is configured correctly, because nginx gives up waiting
+  # before the backend finishes waking up.
+  proxy_connect_timeout 120s;
+  proxy_send_timeout 120s;
+  proxy_read_timeout 120s;
 
   location = /api/tenants { rewrite ^/api/(.*)$ /$1 break; proxy_pass $tenant_catalog; }
   location /api/tenants/ { rewrite ^/api/(.*)$ /$1 break; proxy_pass $tenant_catalog; }
