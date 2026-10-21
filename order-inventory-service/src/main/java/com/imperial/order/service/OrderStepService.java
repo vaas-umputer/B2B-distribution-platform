@@ -157,6 +157,51 @@ public class OrderStepService {
         return order;
     }
 
+    /**
+     * Compensation for reserveStock(): invoice issuance failed after stock
+     * was already reserved, so that reservation must be given back - same
+     * fixed-alphabetical sku lock ordering as reserveStock() itself, for
+     * the same deadlock-avoidance reason.
+     */
+    @TenantScoped
+    @Transactional
+    public void releaseStock(UUID orderId, List<OrderLineRequest> items) {
+        var sortedSkus = new TreeSet<String>();
+        items.forEach(item -> sortedSkus.add(item.sku()));
+
+        List<InventoryItem> locked = new ArrayList<>();
+        for (String sku : sortedSkus) {
+            inventoryRepository.lockBySku(sku).ifPresent(locked::add);
+        }
+
+        for (OrderLineRequest item : items) {
+            locked.stream().filter(i -> i.getSku().equals(item.sku())).findFirst().ifPresent(inv -> {
+                inv.setQtyReserved(inv.getQtyReserved() - item.qty());
+                inventoryRepository.save(inv);
+            });
+        }
+        log.info("order {} stock RELEASED (compensation)", orderId);
+    }
+
+    /**
+     * Terminal state for a downstream Feign call that threw instead of
+     * returning a clean result - see OrderStatus.FAILED's Javadoc. Separate
+     * from recordCreditResult/reserveStock's rejection branches, which
+     * record a clean business decision the downstream service actually
+     * made.
+     */
+    @TenantScoped
+    @Transactional
+    public OrderEntity markFailed(UUID orderId, String reason) {
+        OrderEntity order = orderRepository.findById(orderId).orElseThrow();
+        order.setStatus(OrderStatus.FAILED);
+        order.setSagaState(OrderStatus.FAILED);
+        order.setRejectionReason(reason);
+        orderRepository.save(order);
+        log.warn("order {} FAILED: {}", orderId, reason);
+        return order;
+    }
+
     @TenantScoped
     @Transactional(readOnly = true)
     public Optional<OrderEntity> findById(UUID id) {

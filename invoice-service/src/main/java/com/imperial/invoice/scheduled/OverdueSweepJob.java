@@ -45,13 +45,25 @@ public class OverdueSweepJob {
             return;
         }
         log.info("overdue sweep: {} invoice(s) past due", candidates.size());
+        int failures = 0;
         for (Candidate candidate : candidates) {
             TenantContext.set(candidate.tenantId());
             try {
                 invoiceService.markOverdue(candidate.invoiceId());
+            } catch (RuntimeException e) {
+                // One bad row (an illegal-transition 409, a RabbitMQ
+                // publish failure inside markOverdue's same transaction,
+                // etc.) must not abort the whole run - every other
+                // tenant's overdue invoices still need to be swept today.
+                failures++;
+                log.error("overdue sweep: failed to mark invoice {} (tenant {}) overdue - will retry on the next run",
+                        candidate.invoiceId(), candidate.tenantId(), e);
             } finally {
                 TenantContext.clear();
             }
+        }
+        if (failures > 0) {
+            log.warn("overdue sweep: {} of {} invoice(s) failed this run", failures, candidates.size());
         }
     }
 

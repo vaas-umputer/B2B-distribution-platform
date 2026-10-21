@@ -65,8 +65,24 @@ public class OrderSagaOrchestrator {
         BigDecimal totalValue = computeTotal(items);
         OrderEntity order = orderStepService.createOrder(tenantId, items, totalValue, idempotencyKey);
 
-        LockCreditResponse creditResponse = creditServiceClient.lockCredit(
-                new LockCreditRequest(tenantId, order.getId(), totalValue));
+        LockCreditResponse creditResponse;
+        try {
+            creditResponse = creditServiceClient.lockCredit(
+                    new LockCreditRequest(tenantId, order.getId(), totalValue));
+        } catch (RuntimeException e) {
+            // Nothing committed on our side beyond PLACED, so there's
+            // nothing to compensate here - but we genuinely don't know
+            // whether Credit Service itself applied the lock before this
+            // call failed (timeout/connection-refused/5xx all look the
+            // same from here). Credit Service's own lockCredit is
+            // idempotent by orderId, so if it DID apply, a future retry of
+            // this exact order would be a safe no-op rather than a double
+            // lock - but nothing automatically retries today, hence FAILED
+            // rather than a clean rejection.
+            log.error("order {} credit lock call failed - downstream outcome unknown", order.getId(), e);
+            order = orderStepService.markFailed(order.getId(), "credit check failed: " + e.getMessage());
+            return toView(order);
+        }
         order = orderStepService.recordCreditResult(order.getId(), creditResponse.approved(), creditResponse.reason());
 
         if (!creditResponse.approved()) {
@@ -76,16 +92,39 @@ public class OrderSagaOrchestrator {
         StockReservationResult stockResult = orderStepService.reserveStock(order.getId(), items, simulateStockFailure);
         if (!stockResult.success()) {
             log.info("order {} stock check failed - releasing credit lock {} (compensation)", order.getId(), creditResponse.lockId());
-            creditServiceClient.releaseCredit(creditResponse.lockId());
+            releaseCreditBestEffort(creditResponse.lockId());
             order = orderStepService.findById(order.getId()).orElseThrow();
             return toView(order);
         }
 
-        IssueInvoiceResponse invoiceResponse = invoiceServiceClient.issueInvoice(
-                new IssueInvoiceRequest(order.getId(), tenantId, totalValue, "NET_30"));
+        IssueInvoiceResponse invoiceResponse;
+        try {
+            invoiceResponse = invoiceServiceClient.issueInvoice(
+                    new IssueInvoiceRequest(order.getId(), tenantId, totalValue, "NET_30"));
+        } catch (RuntimeException e) {
+            // Unlike the credit-lock failure above, stock IS already
+            // reserved and credit IS already locked at this point - both
+            // must be compensated, or the tenant permanently loses that
+            // stock/credit capacity for an order that never completed.
+            log.error("order {} invoice issuance failed - releasing credit lock {} and stock (compensation)",
+                    order.getId(), creditResponse.lockId(), e);
+            releaseCreditBestEffort(creditResponse.lockId());
+            orderStepService.releaseStock(order.getId(), items);
+            order = orderStepService.markFailed(order.getId(), "invoice issuance failed: " + e.getMessage());
+            return toView(order);
+        }
         order = orderStepService.recordInvoiced(order.getId(), invoiceResponse.invoiceId());
 
         return toView(order);
+    }
+
+    /** A failed release here must never mask the ORIGINAL failure that triggered compensation - log and move on, don't throw. */
+    private void releaseCreditBestEffort(UUID lockId) {
+        try {
+            creditServiceClient.releaseCredit(lockId);
+        } catch (RuntimeException e) {
+            log.error("compensation FAILED: could not release credit lock {} - requires manual reconciliation", lockId, e);
+        }
     }
 
     public Optional<OrderView> findById(UUID id) {

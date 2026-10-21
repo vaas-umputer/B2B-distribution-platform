@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.UUID;
@@ -35,12 +36,22 @@ public class AdminOnboardingController {
     }
     @PostMapping("/{tenantId}/approve") @ResponseStatus(HttpStatus.NO_CONTENT)
     public void approve(@PathVariable UUID tenantId, @RequestBody ReviewRequest request) {
-        system.update("UPDATE tenants SET status='ACTIVE' WHERE id=? AND status='PENDING_REVIEW'", tenantId);
+        int updated = system.update("UPDATE tenants SET status='ACTIVE' WHERE id=? AND status='PENDING_REVIEW'", tenantId);
+        if (updated == 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant does not exist or is not pending review");
+        }
         system.update("UPDATE tenant_documents SET review_status='ACCEPTED', review_note=? WHERE tenant_id=?", request.note(), tenantId);
     }
     @PostMapping("/{tenantId}/reject") @ResponseStatus(HttpStatus.NO_CONTENT)
     public void reject(@PathVariable UUID tenantId, @RequestBody ReviewRequest request) {
-        system.update("UPDATE tenants SET status='REJECTED' WHERE id=?", tenantId);
+        // Mirrors approve()'s guard: only a still-pending tenant can be
+        // rejected, so an already-ACTIVE tenant can't be silently flipped
+        // to REJECTED, and a nonexistent id gets a clean 409 instead of a
+        // no-op 204 a caller can't distinguish from success.
+        int updated = system.update("UPDATE tenants SET status='REJECTED' WHERE id=? AND status='PENDING_REVIEW'", tenantId);
+        if (updated == 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant does not exist or is not pending review");
+        }
         system.update("UPDATE tenant_documents SET review_status='REJECTED', review_note=? WHERE tenant_id=?", request.note(), tenantId);
     }
     public record ReviewRequest(String note) {}

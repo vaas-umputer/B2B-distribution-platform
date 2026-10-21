@@ -6,8 +6,10 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
@@ -26,10 +28,11 @@ public class DocumentController {
 
     @PostMapping(consumes = "multipart/form-data")
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasAnyRole('TENANT','PENDING')")
     @TenantScoped
     @Transactional
     public DocumentView upload(@RequestParam String type, @RequestParam MultipartFile file) throws IOException {
-        if (file.isEmpty()) throw new IllegalArgumentException("file is required");
+        if (file.isEmpty()) throw new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "file is required");
         UUID tenantId = TenantContext.get(), id = UUID.randomUUID();
         String safeName = Path.of(file.getOriginalFilename() == null ? "document" : file.getOriginalFilename()).getFileName().toString();
         String key = tenantId + "/" + id + "-" + safeName;

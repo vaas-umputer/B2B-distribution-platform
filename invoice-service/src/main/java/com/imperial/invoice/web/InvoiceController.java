@@ -5,6 +5,7 @@ import com.imperial.common.dto.IssueInvoiceResponse;
 import com.imperial.common.tenant.TenantContext;
 import com.imperial.invoice.domain.Invoice;
 import com.imperial.invoice.service.InvoiceService;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -31,7 +32,7 @@ public class InvoiceController {
     }
 
     @PostMapping
-    public IssueInvoiceResponse issue(@RequestBody IssueInvoiceRequest request) {
+    public IssueInvoiceResponse issue(@Valid @RequestBody IssueInvoiceRequest request) {
         if (!request.tenantId().equals(TenantContext.get())) {
             throw new ResponseStatusException(BAD_REQUEST, "tenantId does not match authenticated caller");
         }

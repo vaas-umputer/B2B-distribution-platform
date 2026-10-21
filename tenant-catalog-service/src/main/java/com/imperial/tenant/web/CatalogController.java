@@ -2,6 +2,7 @@ package com.imperial.tenant.web;
 
 import com.imperial.common.tenant.TenantContext;
 import com.imperial.tenant.dto.ProductDto;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,6 +26,7 @@ public class CatalogController {
             new ProductDto("SKU-003", "1L Bottle - Surface Cleaner Concentrate", new BigDecimal("210.00")));
 
     @GetMapping("/{tenantId}")
+    @PreAuthorize("hasRole('TENANT')")
     public List<ProductDto> getCatalog(@PathVariable UUID tenantId) {
         if (!tenantId.equals(TenantContext.get())) {
             throw new ResponseStatusException(FORBIDDEN, "cannot view another tenant's catalog");

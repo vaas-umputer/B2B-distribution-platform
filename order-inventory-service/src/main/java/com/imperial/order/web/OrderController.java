@@ -5,6 +5,7 @@ import com.imperial.order.domain.OrderStatus;
 import com.imperial.order.dto.OrderView;
 import com.imperial.order.dto.PlaceOrderRequest;
 import com.imperial.order.service.OrderSagaOrchestrator;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +25,7 @@ public class OrderController {
 
     private static final Set<OrderStatus> REJECTED_STATUSES = Set.of(
             OrderStatus.CREDIT_REJECTED, OrderStatus.STOCK_REJECTED);
+    private static final Set<OrderStatus> FAILED_STATUSES = Set.of(OrderStatus.FAILED);
 
     private final OrderSagaOrchestrator orderSagaOrchestrator;
 
@@ -34,7 +36,7 @@ public class OrderController {
     @PostMapping
     @PreAuthorize("hasRole('TENANT')")
     public ResponseEntity<OrderView> placeOrder(
-            @RequestBody PlaceOrderRequest request,
+            @Valid @RequestBody PlaceOrderRequest request,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestParam(name = "simulateStockFailure", defaultValue = "false") boolean simulateStockFailure) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
@@ -47,8 +49,9 @@ public class OrderController {
         UUID tenantId = TenantContext.get();
         OrderView result = orderSagaOrchestrator.placeOrder(tenantId, request.items(), simulateStockFailure, idempotencyKey);
 
-        HttpStatus status = REJECTED_STATUSES.contains(OrderStatus.valueOf(result.status()))
-                ? HttpStatus.UNPROCESSABLE_ENTITY
+        OrderStatus resultStatus = OrderStatus.valueOf(result.status());
+        HttpStatus status = REJECTED_STATUSES.contains(resultStatus) ? HttpStatus.UNPROCESSABLE_ENTITY
+                : FAILED_STATUSES.contains(resultStatus) ? HttpStatus.BAD_GATEWAY
                 : HttpStatus.CREATED;
         return ResponseEntity.status(status).body(result);
     }

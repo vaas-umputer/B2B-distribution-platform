@@ -1,5 +1,8 @@
 package com.imperial.order.dto;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotEmpty;
+
 import java.util.List;
 
 /**
@@ -7,5 +10,5 @@ import java.util.List;
  * TenantContext.get() (from the caller's own JWT), never something the
  * client gets to assert in the request body.
  */
-public record PlaceOrderRequest(List<OrderLineRequest> items) {
+public record PlaceOrderRequest(@NotEmpty @Valid List<OrderLineRequest> items) {
 }

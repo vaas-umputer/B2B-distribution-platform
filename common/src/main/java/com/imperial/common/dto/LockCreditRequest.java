@@ -1,5 +1,8 @@
 package com.imperial.common.dto;
 
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+
 import java.math.BigDecimal;
 import java.util.UUID;
 
@@ -9,8 +12,8 @@ import java.util.UUID;
  * stubbed check and Phase 2's real two-level (tenant + pool) check.
  */
 public record LockCreditRequest(
-        UUID tenantId,
-        UUID orderId,
-        BigDecimal orderValue
+        @NotNull UUID tenantId,
+        @NotNull UUID orderId,
+        @NotNull @Positive BigDecimal orderValue
 ) {
 }

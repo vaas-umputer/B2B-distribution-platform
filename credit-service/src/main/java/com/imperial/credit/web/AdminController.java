@@ -6,6 +6,7 @@ import com.imperial.credit.dto.LimitIncreaseRequestView;
 import com.imperial.credit.dto.MonthlyReportView;
 import com.imperial.credit.service.AdminReadService;
 import com.imperial.credit.service.LimitIncreaseRequestService;
+import com.imperial.credit.service.OverrideBelowOutstandingException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -69,6 +70,14 @@ public class AdminController {
         } catch (NoSuchElementException e) {
             throw new ResponseStatusException(NOT_FOUND, e.getMessage());
         } catch (IllegalStateException e) {
+            throw new ResponseStatusException(CONFLICT, e.getMessage());
+        } catch (OverrideBelowOutstandingException e) {
+            // approve() funds the request through the same overrideLimit()
+            // path CreditController.overrideLimit uses - without this catch,
+            // approving a stale request (outstanding grew past the
+            // requested amount since it was submitted) would leak as a
+            // raw 500 instead of a clean 409, the same case CreditController
+            // already handles correctly for the manual-override endpoint.
             throw new ResponseStatusException(CONFLICT, e.getMessage());
         }
     }

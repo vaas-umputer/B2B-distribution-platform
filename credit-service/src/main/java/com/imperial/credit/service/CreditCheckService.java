@@ -184,8 +184,21 @@ public class CreditCheckService {
     @TenantScoped
     @Transactional
     public CreditAccount provisionAccount(UUID tenantId, BigDecimal creditLimit, String setBy) {
-        var existing = creditAccountRepository.findById(tenantId);
+        if (creditLimit == null || creditLimit.signum() < 0) {
+            throw new IllegalArgumentException("creditLimit must be a non-negative amount");
+        }
+        // Re-provisioning an EXISTING account must go through the same
+        // never-below-outstanding safeguard overrideLimit() enforces -
+        // without this, an admin could re-provision a tenant with an
+        // existing balance down to a limit below what's currently owed,
+        // the same corruption overrideLimit() exists specifically to
+        // prevent. A brand-new account has no outstanding balance yet, so
+        // this is a no-op for the first-provisioning case.
+        var existing = creditAccountRepository.lockByTenantId(tenantId);
         BigDecimal oldLimit = existing.map(CreditAccount::getCreditLimit).orElse(null);
+        if (existing.isPresent() && !CreditMath.isOverrideAllowed(creditLimit, existing.get().getOutstanding())) {
+            throw new OverrideBelowOutstandingException(creditLimit, existing.get().getOutstanding());
+        }
 
         CreditAccount account = existing
                 .map(acc -> {

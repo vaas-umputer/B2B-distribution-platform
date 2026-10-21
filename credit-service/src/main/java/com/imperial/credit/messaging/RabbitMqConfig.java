@@ -33,19 +33,65 @@ public class RabbitMqConfig {
     public static final String LIMIT_INCREASE_REQUESTED_ROUTING_KEY = "credit.limit_increase_requested";
     public static final String LIMIT_INCREASE_REQUESTED_QUEUE = "credit-service.limit-increase-requested-log";
 
+    /**
+     * Without this, a message that keeps throwing (e.g. invoice.paid for an
+     * order whose credit lock/account is missing - IllegalStateException in
+     * CreditCheckService.applyReleaseOrConsume) requeues forever under
+     * Spring AMQP's default behavior, becoming a poison message that loops
+     * indefinitely and starves the queue for every other tenant's events.
+     * Combined with the listener retry config in application.yml (3
+     * attempts, then reject-without-requeue), an exhausted message lands
+     * here instead of looping or being silently discarded, where it's
+     * visible and replayable instead of invisible.
+     */
+    public static final String DEAD_LETTER_EXCHANGE = "invoice.exchange.dlx";
+    public static final String PAID_DLQ = PAID_QUEUE + ".dlq";
+    public static final String OVERDUE_DLQ = OVERDUE_QUEUE + ".dlq";
+
     @Bean
     public TopicExchange invoiceExchange() {
         return new TopicExchange(INVOICE_EXCHANGE, true, false);
     }
 
     @Bean
+    public DirectExchange deadLetterExchange() {
+        return new DirectExchange(DEAD_LETTER_EXCHANGE, true, false);
+    }
+
+    @Bean
     public Queue invoicePaidQueue() {
-        return new Queue(PAID_QUEUE, true);
+        return org.springframework.amqp.core.QueueBuilder.durable(PAID_QUEUE)
+                .withArgument("x-dead-letter-exchange", DEAD_LETTER_EXCHANGE)
+                .withArgument("x-dead-letter-routing-key", PAID_DLQ)
+                .build();
     }
 
     @Bean
     public Queue invoiceOverdueQueue() {
-        return new Queue(OVERDUE_QUEUE, true);
+        return org.springframework.amqp.core.QueueBuilder.durable(OVERDUE_QUEUE)
+                .withArgument("x-dead-letter-exchange", DEAD_LETTER_EXCHANGE)
+                .withArgument("x-dead-letter-routing-key", OVERDUE_DLQ)
+                .build();
+    }
+
+    @Bean
+    public Queue invoicePaidDlq() {
+        return new Queue(PAID_DLQ, true);
+    }
+
+    @Bean
+    public Queue invoiceOverdueDlq() {
+        return new Queue(OVERDUE_DLQ, true);
+    }
+
+    @Bean
+    public Binding paidDlqBinding(Queue invoicePaidDlq, DirectExchange deadLetterExchange) {
+        return BindingBuilder.bind(invoicePaidDlq).to(deadLetterExchange).with(PAID_DLQ);
+    }
+
+    @Bean
+    public Binding overdueDlqBinding(Queue invoiceOverdueDlq, DirectExchange deadLetterExchange) {
+        return BindingBuilder.bind(invoiceOverdueDlq).to(deadLetterExchange).with(OVERDUE_DLQ);
     }
 
     @Bean

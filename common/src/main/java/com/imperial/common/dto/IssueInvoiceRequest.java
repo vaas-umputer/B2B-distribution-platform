@@ -1,5 +1,8 @@
 package com.imperial.common.dto;
 
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+
 import java.math.BigDecimal;
 import java.util.UUID;
 
@@ -9,9 +12,9 @@ import java.util.UUID;
  * issued against it. "terms" is the payment window, e.g. "NET_30".
  */
 public record IssueInvoiceRequest(
-        UUID orderId,
-        UUID tenantId,
-        BigDecimal amount,
+        @NotNull UUID orderId,
+        @NotNull UUID tenantId,
+        @NotNull @Positive BigDecimal amount,
         String terms
 ) {
 }

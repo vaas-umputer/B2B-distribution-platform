@@ -57,6 +57,14 @@ public class AuthController {
         // enforces "you can only ever confirm your own identity" here.
         var tenant = tenantService.authenticate(request.username(), request.password())
                 .orElseThrow(() -> new ResponseStatusException(UNAUTHORIZED, "invalid username or password"));
+        // A rejected onboarding must not yield a usable token at all - the
+        // frontend's role==PENDING screen was the only thing stopping a
+        // rejected tenant from using the app, and nothing enforced that
+        // server-side (every tenant-scoped endpoint just checked "is this
+        // the caller's own tenant id", not "is this tenant allowed in").
+        if (tenant.getStatus() == com.imperial.tenant.domain.TenantStatus.REJECTED) {
+            throw new ResponseStatusException(UNAUTHORIZED, "onboarding was rejected");
+        }
         String role = tenant.getStatus() == com.imperial.tenant.domain.TenantStatus.ACTIVE ? ROLE_TENANT : "PENDING";
         return new LoginResponse(jwtService.generateToken(tenant.getId(), role));
     }

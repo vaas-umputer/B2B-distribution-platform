@@ -34,6 +34,7 @@ public class TenantService {
     @Transactional
     public Tenant onboard(String name, String username, String password, String email, String phone) {
         if (username == null || username.isBlank() || password == null || password.length() < 8) throw new IllegalArgumentException("username and password (8+ chars) are required");
+        if (name == null || name.isBlank()) throw new IllegalArgumentException("business name is required");
 
         // Same reason as authenticate(): findByUsername's result is gated by
         // the tenants_self_select RLS policy's "username = current_setting

@@ -9,6 +9,7 @@ import com.imperial.credit.service.CreditCheckService;
 import com.imperial.credit.service.CreditRiskScoreService;
 import com.imperial.credit.service.LimitIncreaseRequestService;
 import com.imperial.credit.service.OverrideBelowOutstandingException;
+import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
@@ -37,7 +38,7 @@ public class CreditController {
     }
 
     @PostMapping("/lock")
-    public LockCreditResponse lock(@RequestBody LockCreditRequest request) {
+    public LockCreditResponse lock(@Valid @RequestBody LockCreditRequest request) {
         UUID callerTenantId = TenantContext.get();
         if (!request.tenantId().equals(callerTenantId)) {
             throw new ResponseStatusException(BAD_REQUEST, "tenantId does not match authenticated caller");
@@ -56,7 +57,7 @@ public class CreditController {
 
     /** Pure suggestion - never applied by itself. See RiskScoringService's Javadoc. */
     @PostMapping("/{tenantId}/risk-score")
-    public RiskScoreView score(@PathVariable UUID tenantId, @RequestBody RiskScoreRequest request) {
+    public RiskScoreView score(@PathVariable UUID tenantId, @Valid @RequestBody RiskScoreRequest request) {
         requireSelf(tenantId);
         var data = new OnboardingData(request.declaredMonthlyVolume(), request.businessVintageYears(),
                 request.collateralOffered(), request.relationshipCategoryPoints());
@@ -73,7 +74,7 @@ public class CreditController {
      * OR by an admin acting on a target tenant - see requireSelfOrAdmin.
      */
     @PostMapping("/{tenantId}/accounts")
-    public CreditAccountView provision(@PathVariable UUID tenantId, @RequestBody ProvisionAccountRequest request) {
+    public CreditAccountView provision(@PathVariable UUID tenantId, @Valid @RequestBody ProvisionAccountRequest request) {
         boolean isAdmin = requireSelfOrAdmin(tenantId);
         try {
             String setBy = isAdmin ? "admin" : "self-service";
@@ -106,7 +107,7 @@ public class CreditController {
      */
     @PatchMapping("/{tenantId}/limit")
     @PreAuthorize("hasRole('ADMIN')")
-    public CreditAccountView overrideLimit(@PathVariable UUID tenantId, @RequestBody ManualOverrideRequest request) {
+    public CreditAccountView overrideLimit(@PathVariable UUID tenantId, @Valid @RequestBody ManualOverrideRequest request) {
         TenantContext.set(tenantId);
         try {
             var account = creditCheckService.overrideLimit(tenantId, request.newLimit(), request.overrideReason(), "admin");
@@ -123,7 +124,7 @@ public class CreditController {
     /** Tenant role: a tenant submits a request for itself, landing in the admin review queue. */
     @PostMapping("/{tenantId}/limit-increase-requests")
     public LimitIncreaseRequestView submitLimitIncreaseRequest(
-            @PathVariable UUID tenantId, @RequestBody SubmitLimitIncreaseRequest request) {
+            @PathVariable UUID tenantId, @Valid @RequestBody SubmitLimitIncreaseRequest request) {
         requireSelf(tenantId);
         var created = limitIncreaseRequestService.submit(tenantId, request.requestedAmount(), request.reason());
         return LimitIncreaseRequestView.from(created);

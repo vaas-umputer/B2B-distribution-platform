@@ -38,10 +38,32 @@ public class InvoiceService {
     @TenantScoped
     @Transactional
     public Invoice issue(UUID orderId, UUID tenantId, BigDecimal amount, String terms) {
+        // A retried issueInvoice call for the SAME order (e.g. Order &
+        // Inventory Service's Feign call timed out but actually succeeded
+        // server-side, so it retries) must not create a second invoice -
+        // same idempotency-by-natural-key pattern Credit Service uses for
+        // lockCredit. The invoices_order_id_unique constraint (V3
+        // migration) is the real guarantee under concurrent duplicates;
+        // this check just makes the common case a clean no-op instead of
+        // relying on catching a constraint violation.
+        var existing = invoiceRepository.findByOrderId(orderId);
+        if (existing.isPresent()) {
+            log.info("issueInvoice retry for order {} - returning existing invoice {}", orderId, existing.get().getId());
+            return existing.get();
+        }
+
         LocalDate dueDate = computeDueDate(terms);
         Invoice invoice = new Invoice(
                 UUID.randomUUID(), orderId, tenantId, amount, terms, InvoiceStatus.ISSUED, dueDate, Instant.now());
-        invoiceRepository.save(invoice);
+        try {
+            invoiceRepository.save(invoice);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // Belt-and-suspenders for the race the check above can't close
+            // by itself: two concurrent retries for the same order can both
+            // pass the check before either commits.
+            return invoiceRepository.findByOrderId(orderId)
+                    .orElseThrow(() -> e);
+        }
         log.info("invoice ISSUED {} for order {} - amount={} dueDate={}", invoice.getId(), orderId, amount, dueDate);
         return invoice;
     }
@@ -99,7 +121,10 @@ public class InvoiceService {
         int days = switch (terms) {
             case "NET_15" -> 15;
             case "NET_60" -> 60;
-            default -> 30; // NET_30 and anything unrecognized - a safe default, not a silent full exemption
+            // NET_30, null, and anything unrecognized - a safe default, not
+            // an NPE. A traditional switch on a null String throws before
+            // this method even runs; Java 21's `case null` pattern avoids that.
+            case null, default -> 30;
         };
         return LocalDate.now().plusDays(days);
     }
