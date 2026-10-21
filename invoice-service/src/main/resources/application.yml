@@ -21,8 +21,11 @@ spring:
     password: ${RABBITMQ_PASSWORD:guest}
 
 system:
+  # See credit-service's application.yml for why this "options" param is
+  # here - sets app.admin_mode on every connection this pool opens,
+  # replacing BYPASSRLS (not grantable on a managed Postgres host).
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:invoice_db}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:invoice_db}?options=-c%20app.admin_mode%3Dtrue
     username: ${SYSTEM_DB_USER:svc_system}
     password: ${SYSTEM_DB_PASSWORD:svc_system}
 

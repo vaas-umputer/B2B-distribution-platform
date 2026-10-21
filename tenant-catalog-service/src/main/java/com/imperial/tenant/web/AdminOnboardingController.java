@@ -21,7 +21,14 @@ public class AdminOnboardingController {
     public AdminOnboardingController(@Value("${spring.datasource.url}") String url,
                                      @Value("${system.datasource.username:svc_system}") String user,
                                      @Value("${system.datasource.password:svc_system}") String password) {
-        var ds = new DriverManagerDataSource(url, user, password);
+        // Sets the app.admin_mode GUC on every connection this pool opens
+        // (pgjdbc's "options" param is passed straight through as libpq -c
+        // flags) - see the tenants_admin_bypass/tenant_documents_admin_bypass
+        // RLS policies (V3 migration) and infra/postgres-init's Javadoc for
+        // why this replaces BYPASSRLS, which a managed Postgres host never
+        // grants its provisioned user the right to hand out.
+        String adminUrl = url + (url.contains("?") ? "&" : "?") + "options=-c%20app.admin_mode%3Dtrue";
+        var ds = new DriverManagerDataSource(adminUrl, user, password);
         this.system = new JdbcTemplate(ds);
     }
     @GetMapping

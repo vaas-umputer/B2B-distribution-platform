@@ -30,8 +30,15 @@ spring:
         default-requeue-rejected: false # after retries are exhausted, reject (routes to the DLQ) instead of requeuing forever
 
 system:
+  # ?options=-c%20app.admin_mode%3Dtrue sets the app.admin_mode GUC on
+  # every connection this pool opens (pgjdbc's "options" param is passed
+  # straight through as libpq -c flags) - see the admin-bypass RLS
+  # policies (V5 migration) and infra/postgres-init's Javadoc for why this
+  # replaces BYPASSRLS. Safe to leave on for the pool's whole lifetime:
+  # this DataSource is used ONLY for genuinely cross-tenant admin reads,
+  # never shared with the RLS-enforced app_user pool above.
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:credit_db}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:credit_db}?options=-c%20app.admin_mode%3Dtrue
     username: ${SYSTEM_DB_USER:svc_system}
     password: ${SYSTEM_DB_PASSWORD:svc_system}
 
