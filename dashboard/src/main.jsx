@@ -103,7 +103,16 @@ function Admin({ session }) {
       setTenantId(''); setNewLimit(''); setReason(''); setSuggestion(null);
       refresh();
     } catch (err) {
-      setMessage(err.message);
+      // The never-below-outstanding safeguard rejects with 409 and a raw
+      // JSON body (no readable message field) - without this, the admin
+      // just saw an unparsed JSON blob and the limit silently stayed
+      // unchanged, with no indication why the "update" didn't take.
+      if (err.status === 409) {
+        const current = data.utilization.find(x => x.tenantId === tenantId);
+        setMessage(current ? `Cannot set limit below what's currently outstanding (${money(current.outstanding)}).` : "Cannot set limit below what's currently outstanding.");
+      } else {
+        setMessage(err.message);
+      }
     } finally {
       setSubmitting(false);
     }
