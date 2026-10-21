@@ -55,6 +55,13 @@ public class CreditCheckService {
         this.creditOverrideWriter = creditOverrideWriter;
     }
 
+    /** Self-service read: lets the dashboard check "do I even have a credit account yet" before offering to place an order. */
+    @TenantScoped
+    @Transactional(readOnly = true)
+    public java.util.Optional<CreditAccount> findAccount(UUID tenantId) {
+        return creditAccountRepository.findById(tenantId);
+    }
+
     @TenantScoped
     @Transactional
     public LockCreditResponse lockCredit(UUID tenantId, UUID orderId, BigDecimal orderValue) {

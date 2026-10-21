@@ -37,6 +37,15 @@ public class CreditController {
         this.limitIncreaseRequestService = limitIncreaseRequestService;
     }
 
+    /** Self-service: lets the dealer dashboard check whether it has a credit account before offering to place an order, instead of letting every order attempt fail with "no credit account provisioned yet". */
+    @GetMapping("/{tenantId}/account")
+    public CreditAccountView getAccount(@PathVariable UUID tenantId) {
+        requireSelf(tenantId);
+        return creditCheckService.findAccount(tenantId)
+                .map(CreditAccountView::from)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "no credit account provisioned yet"));
+    }
+
     @PostMapping("/lock")
     public LockCreditResponse lock(@Valid @RequestBody LockCreditRequest request) {
         UUID callerTenantId = TenantContext.get();
