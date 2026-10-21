@@ -5,6 +5,19 @@ independently deployable Spring Boot microservices, with PostgreSQL
 row-level security for tenant isolation and RabbitMQ for event-driven
 credit rotation.
 
+## Live deployment
+
+**[b2b-distribution-platform-gateway.onrender.com](https://b2b-distribution-platform-gateway.onrender.com)**
+— live as of **October 21, 2026**.
+
+This is a free-tier deployment (Render web services + Postgres, CloudAMQP
+RabbitMQ) meant as a working demo, not a permanent environment — free-tier
+services spin down after ~15 minutes of inactivity, so the first request
+after idle time can take up to a minute to wake back up. A walkthrough
+video is coming soon. A permanent deployment with real object storage for
+documents (see [Object storage](#object-storage-current-state) below) is
+planned for later; this URL may change or go offline when that happens.
+
 ## Architecture
 
 ```
@@ -84,9 +97,8 @@ Default admin login: `admin` / `admin-dev-secret-CHANGE-ME` (override via
 2. **Approve it** — log in as *Admin* → *Onboarding review* → Approve the
    new business.
 3. **Fund its credit** — still as admin, use *Manual credit override*:
-   paste the tenant's id (from the Tenant utilization table), set a limit,
-   submit. (First-time provisioning and later overrides both go through
-   this one form.)
+   pick the tenant from the dropdown, set a limit, submit. (First-time
+   provisioning and later overrides both go through this one form.)
 4. **Place an order** — log out, log back in as the dealer → pick a
    product and quantity → *Place order*. It should complete and an invoice
    should appear.
@@ -102,6 +114,26 @@ Default admin login: `admin` / `admin-dev-secret-CHANGE-ME` (override via
 
 Integration tests spin up their own ephemeral Postgres/RabbitMQ via
 Testcontainers — no local services required, just a working Docker daemon.
+
+## Object storage (current state)
+
+Onboarding document uploads (`POST /documents`, `tenant-catalog-service`)
+currently write to **local disk** on the container (`uploads/` by default,
+configurable via `DOCUMENT_STORAGE_LOCAL_PATH`) — the database only ever
+stores the file's metadata and a storage key, never the bytes themselves,
+exactly as if it were already object storage.
+
+This works for local `docker-compose` (the volume persists on your
+machine) but **not** on the live Render deployment: Render's free web
+services have an ephemeral filesystem, so anything written to local disk
+is lost on every restart, redeploy, or free-tier spin-down/spin-up cycle.
+Uploaded documents on the live demo should be assumed temporary.
+
+The fix is already anticipated in the code (`DocumentController`'s own
+comment: "replace its file write with an R2 putObject call") — swapping
+in real object storage (Cloudflare R2, S3, etc.) behind the same
+`storage_key` column is a contained change, planned alongside the move to
+a permanent deployment.
 
 ## Project layout
 
