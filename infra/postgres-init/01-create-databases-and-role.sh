@@ -34,6 +34,15 @@ set -euo pipefail
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-SQL
     CREATE ROLE app_user LOGIN PASSWORD 'app_user';
     CREATE ROLE svc_system LOGIN PASSWORD 'svc_system';
+    -- The later "ALTER DEFAULT PRIVILEGES FOR ROLE app_user" step requires
+    -- membership in app_user, which CREATE ROLE alone does not confer.
+    -- Postgres 16+ CAN auto-grant that on role creation, but only when the
+    -- server's createrole_self_grant setting opts in to it - off by
+    -- default, and a managed host's connecting user (e.g. Render's) won't
+    -- have it set, so this is explicit rather than relying on that default.
+    -- A real superuser (local docker-compose's "postgres") can always
+    -- grant any role, so this is harmless there too.
+    GRANT app_user TO ${POSTGRES_USER};
 SQL
 
 for db in tenant_db order_db credit_db invoice_db; do
