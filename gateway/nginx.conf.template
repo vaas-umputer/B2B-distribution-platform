@@ -1,5 +1,12 @@
 server {
-  listen 8080;
+  # Render (and most PaaS hosts) inject their own PORT and expect the app
+  # to bind to it - without this, nginx keeps listening on 8080 while the
+  # platform's port scanner looks for whatever PORT it assigned, and the
+  # deploy times out as "no open ports detected" (the exact failure the
+  # 4 backend services hit before their own server.port became
+  # ${PORT:...}-driven). Falls back to 8080 for docker-compose, which
+  # never sets PORT.
+  listen ${PORT};
   root /usr/share/nginx/html;
   index index.html;
   # Compose services can come up after Nginx. Resolve them at request time

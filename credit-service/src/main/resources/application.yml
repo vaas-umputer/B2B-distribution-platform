@@ -1,5 +1,6 @@
 server:
-  port: 8083
+  # See tenant-catalog-service's application.yml for why this is PORT-driven.
+  port: ${PORT:8083}
 
 spring:
   application:

@@ -18,6 +18,7 @@ ENV TENANT_CATALOG_URL=http://tenant-catalog-service:8081 \
     CREDIT_URL=http://credit-service:8083 \
     INVOICES_URL=http://invoice-service:8084 \
     RESOLVER=127.0.0.11 \
-    NGINX_ENVSUBST_FILTER=^(TENANT_CATALOG_URL|ORDERS_URL|CREDIT_URL|INVOICES_URL|RESOLVER)$
+    PORT=8080 \
+    NGINX_ENVSUBST_FILTER=^(TENANT_CATALOG_URL|ORDERS_URL|CREDIT_URL|INVOICES_URL|RESOLVER|PORT)$
 COPY gateway/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html

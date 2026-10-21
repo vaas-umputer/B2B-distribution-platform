@@ -1,5 +1,11 @@
 server:
-  port: 8081
+  # Render (and most PaaS hosts) inject their own PORT and expect the app
+  # to bind to it - without this, the app keeps listening on the hardcoded
+  # 8081 while the platform's port scanner looks for whatever PORT it
+  # assigned, and the deploy times out as "no open ports detected" even
+  # though the app started fine. Falls back to 8081 for docker-compose,
+  # which never sets PORT.
+  port: ${PORT:8081}
 
 spring:
   application:
