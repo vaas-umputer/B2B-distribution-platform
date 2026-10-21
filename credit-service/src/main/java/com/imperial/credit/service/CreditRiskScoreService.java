@@ -43,6 +43,13 @@ public class CreditRiskScoreService {
         return result;
     }
 
+    /** Admin-facing: the stored suggestion from the tenant's own risk-score submission, if any - lets the admin dashboard prefill a sensible starting limit instead of asking the admin to guess a number. */
+    @TenantScoped
+    @Transactional(readOnly = true)
+    public java.util.Optional<CreditRiskScore> findStored(UUID tenantId) {
+        return creditRiskScoreRepository.findById(tenantId);
+    }
+
     @TenantScoped
     @Transactional(readOnly = true)
     public RiskScoreResult recomputeFromStoredInputs(UUID tenantId) {

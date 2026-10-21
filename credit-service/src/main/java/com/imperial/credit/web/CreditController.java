@@ -74,6 +74,30 @@ public class CreditController {
     }
 
     /**
+     * The suggestion the dashboard's "Manual credit override" form shows
+     * before the admin types a number - without this, there's no way to
+     * see it short of a separate POST /risk-score call. Admin can view ANY
+     * tenant's stored suggestion; a tenant can view only its own. 404 is
+     * the normal case for a tenant that never submitted onboarding risk
+     * data, not an error.
+     */
+    @GetMapping("/{tenantId}/risk-score")
+    public StoredRiskScoreView getStoredScore(@PathVariable UUID tenantId) {
+        boolean isAdmin = requireSelfOrAdmin(tenantId);
+        try {
+            return creditRiskScoreService.findStored(tenantId)
+                    .map(s -> new StoredRiskScoreView(s.getComputedScore(), s.getSuggestedLimit()))
+                    .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "no risk score submitted for this tenant yet"));
+        } finally {
+            if (isAdmin) {
+                TenantContext.clear();
+            }
+        }
+    }
+
+    public record StoredRiskScoreView(int score, java.math.BigDecimal suggestedLimit) { }
+
+    /**
      * Creates a tenant's FIRST credit_accounts row - the step that was
      * missing end to end: after onboarding approval, nothing else can
      * create this row, so without an admin-callable path here a newly

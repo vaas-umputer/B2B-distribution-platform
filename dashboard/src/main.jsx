@@ -63,17 +63,24 @@ function Dealer({ session }) {
 }
 
 function Admin({ session }) {
-  const [data, setData] = useState({ utilization: [], alerts: [], requests: [], onboarding: [], tenants: [], report: null }), [message, setMessage] = useState(''), [username, setUsername] = useState(''), [newLimit, setNewLimit] = useState(''), [reason, setReason] = useState(''), [submitting, setSubmitting] = useState(false);
+  const [data, setData] = useState({ utilization: [], alerts: [], requests: [], onboarding: [], tenants: [], report: null }), [message, setMessage] = useState(''), [tenantId, setTenantId] = useState(''), [newLimit, setNewLimit] = useState(''), [reason, setReason] = useState(''), [submitting, setSubmitting] = useState(false), [suggestion, setSuggestion] = useState(null);
   const refresh = async () => { try { const [utilization, alerts, requests, onboarding, tenants, report] = await Promise.all([api('/admin/utilization', session.token), api('/admin/alerts', session.token), api('/admin/limit-increase-requests?status=PENDING', session.token), api('/admin/onboarding', session.token), api('/admin/onboarding?status=ACTIVE', session.token), api('/admin/reports/monthly/latest', session.token).catch(() => null)]); setData({ utilization: utilization || [], alerts: alerts || [], requests: requests || [], onboarding: onboarding || [], tenants: tenants || [], report }); } catch (e) { setMessage(e.message); } };
   useEffect(() => { refresh(); }, []);
   const decide = async (id, action) => { try { await api(`/admin/limit-increase-requests/${id}/${action}`, session.token, { method: 'POST' }); refresh(); } catch (e) { setMessage(e.message); } };
-  const usernameToId = u => data.tenants.find(t => t.username && t.username.toLowerCase() === u.trim().toLowerCase())?.id;
   const idToUsername = id => data.tenants.find(t => t.id === id)?.username || id.slice(0, 8);
+  // Picking from a real list - built from the same active-tenants fetch
+  // the utilization table uses - instead of typing a username/id by hand
+  // makes "no match for what I typed" structurally impossible.
+  const selectTenant = async id => {
+    setTenantId(id);
+    setSuggestion(undefined); // loading
+    if (!id) { setSuggestion(null); return; }
+    try { setSuggestion(await api(`/credit/${id}/risk-score`, session.token)); }
+    catch (err) { setSuggestion(err.status === 404 ? null : undefined); }
+  };
   const override = async e => {
     e.preventDefault();
-    if (submitting) return;
-    const tenantId = usernameToId(username);
-    if (!tenantId) { setMessage(`no active tenant with username "${username}"`); return; }
+    if (submitting || !tenantId) return;
     setSubmitting(true);
     try {
       // PATCH .../limit enforces the never-below-outstanding safeguard but
@@ -87,6 +94,7 @@ function Admin({ session }) {
         await api(`/credit/${tenantId}/accounts`, session.token, { method: 'POST', body: JSON.stringify({ creditLimit: Number(newLimit) }) });
       }
       setMessage('Credit limit updated.');
+      setTenantId(''); setNewLimit(''); setReason(''); setSuggestion(null);
       refresh();
     } catch (err) {
       setMessage(err.message);
@@ -96,11 +104,26 @@ function Admin({ session }) {
   };
   const reviewOnboarding = async (id, action) => { try { await api(`/admin/onboarding/${id}/${action}`, session.token, { method: 'POST', body: JSON.stringify({ note: 'Reviewed in admin dashboard' }) }); setMessage(`Onboarding ${action}d.`); refresh(); } catch (e) { setMessage(e.message); } };
   const outstanding = data.utilization.reduce((sum, x) => sum + Number(x.outstanding), 0), limit = data.utilization.reduce((sum, x) => sum + Number(x.creditLimit), 0);
-  return <>{message && <p className="message">{message}</p>}<section className="metrics"><Metric title="Pool utilization" value={limit ? `${Math.round(outstanding / limit * 100)}%` : '—'} /><Metric title="Near-limit alerts" value={data.alerts.length} /><Metric title="Pending requests" value={data.requests.length} /><Metric title="Pending onboarding" value={data.onboarding.length} /></section><section className="card"><h2>Onboarding review</h2><Table headers={['Business', 'Username', 'Email', 'Actions']} rows={data.onboarding.map(a => [a.name, a.username, a.email, <span><button onClick={() => reviewOnboarding(a.id, 'approve')}>Approve</button><button className="danger" onClick={() => reviewOnboarding(a.id, 'reject')}>Reject</button></span>])}/></section><section className="card"><h2>Tenant utilization</h2><Table headers={['Tenant', 'Credit limit', 'Outstanding', 'Utilization', 'Status']} rows={data.utilization.map(x => [idToUsername(x.tenantId), money(x.creditLimit), money(x.outstanding), `${x.creditLimit ? Math.round(x.outstanding / x.creditLimit * 100) : 0}%`, x.throttled ? 'Throttled' : 'Active'])}/></section><section className="two"><section className="card"><h2>Near-limit alerts</h2><Table headers={['Tenant', 'Utilization']} rows={data.alerts.map(a => [idToUsername(a.tenantId), `${a.utilization}%`])}/></section><section className="card"><h2>Pending credit requests</h2><Table headers={['Tenant', 'Amount', 'Actions']} rows={data.requests.map(r => [idToUsername(r.tenantId), money(r.requestedAmount), <span><button onClick={() => decide(r.id, 'approve')}>Approve</button><button className="danger" onClick={() => decide(r.id, 'reject')}>Reject</button></span>])}/></section></section><section className="card"><h2>Manual credit override</h2><form className="row" onSubmit={override}><label>Username<input required value={username} onChange={e => setUsername(e.target.value)} /></label><label>New limit<input required min="0" type="number" value={newLimit} onChange={e => setNewLimit(e.target.value)} /></label><label>Reason<input required value={reason} onChange={e => setReason(e.target.value)} /></label><button className="primary" disabled={submitting}>{submitting ? 'Applying...' : 'Apply override'}</button></form></section></>;
+  return <>{message && <p className="message">{message}</p>}<section className="metrics"><Metric title="Pool utilization" value={limit ? `${Math.round(outstanding / limit * 100)}%` : '—'} /><Metric title="Near-limit alerts" value={data.alerts.length} /><Metric title="Pending requests" value={data.requests.length} /><Metric title="Pending onboarding" value={data.onboarding.length} /></section><section className="card"><h2>Onboarding review</h2><Table headers={['Business', 'Username', 'Email', 'Actions']} rows={data.onboarding.map(a => [a.name, a.username, a.email, <span><button onClick={() => reviewOnboarding(a.id, 'approve')}>Approve</button><button className="danger" onClick={() => reviewOnboarding(a.id, 'reject')}>Reject</button></span>])}/></section><section className="card"><h2>Tenant utilization</h2><Table headers={['Tenant', 'Credit limit', 'Outstanding', 'Utilization', 'Status']} rows={data.utilization.map(x => [idToUsername(x.tenantId), money(x.creditLimit), money(x.outstanding), `${x.creditLimit ? Math.round(x.outstanding / x.creditLimit * 100) : 0}%`, x.throttled ? 'Throttled' : 'Active'])}/></section><section className="two"><section className="card"><h2>Near-limit alerts</h2><Table headers={['Tenant', 'Utilization']} rows={data.alerts.map(a => [idToUsername(a.tenantId), `${a.utilization}%`])}/></section><section className="card"><h2>Pending credit requests</h2><Table headers={['Tenant', 'Amount', 'Actions']} rows={data.requests.map(r => [idToUsername(r.tenantId), money(r.requestedAmount), <span><button onClick={() => decide(r.id, 'approve')}>Approve</button><button className="danger" onClick={() => decide(r.id, 'reject')}>Reject</button></span>])}/></section></section><section className="card"><h2>Manual credit override</h2><form className="row" onSubmit={override}><label>Tenant<select required value={tenantId} onChange={e => selectTenant(e.target.value)}><option value="">Select a tenant...</option>{data.tenants.map(t => <option key={t.id} value={t.id}>{t.name} ({t.username || t.id.slice(0, 8)})</option>)}</select></label><label>New limit<input required min="0" type="number" value={newLimit} onChange={e => setNewLimit(e.target.value)} /></label><label>Reason<input required value={reason} onChange={e => setReason(e.target.value)} /></label><button className="primary" disabled={submitting}>{submitting ? 'Applying...' : 'Apply override'}</button></form>{suggestion === undefined && <p className="message">Loading risk assessment...</p>}{suggestion === null && tenantId && <p className="message">No risk assessment submitted by this tenant yet.</p>}{suggestion && <p className="message">Suggested limit: {money(suggestion.suggestedLimit)} (risk score {suggestion.score}/10). <button type="button" onClick={() => setNewLimit(suggestion.suggestedLimit)}>Use suggestion</button></p>}</section></>;
 }
 const Metric = ({ title, value }) => <section className="metric"><span>{title}</span><strong>{value}</strong></section>;
 const Table = ({ headers, rows }) => <div className="table-wrap"><table><thead><tr>{headers.map(h => <th key={h}>{h}</th>)}</tr></thead><tbody>{rows.length ? rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>) : <tr><td colSpan={headers.length}>No records</td></tr>}</tbody></table></div>;
-function Pending({ session }) { const [type, setType] = useState('GSTIN'); const [file, setFile] = useState(null); const [message, setMessage] = useState('Your onboarding is pending admin review.'); const upload = async e => { e.preventDefault(); if (!file) return; try { const form = new FormData(); form.append('type', type); form.append('file', file); const r = await fetch('/api/documents', { method: 'POST', headers: { Authorization: `Bearer ${session.token}` }, body: form }); if (!r.ok) throw new Error(await r.text()); setMessage(`${type} uploaded for review.`); } catch (e) { setMessage(e.message); } }; return <section className="card"><h2>Onboarding pending review</h2><p>{message}</p><form className="row" onSubmit={upload}><label>Document type<select value={type} onChange={e=>setType(e.target.value)}><option>GSTIN</option><option>PAN</option><option>Bank proof</option></select></label><label>Document<input type="file" required onChange={e=>setFile(e.target.files[0])}/></label><button className="primary">Upload document</button></form></section>; }
+function Pending({ session }) {
+  const [type, setType] = useState('GSTIN'), [file, setFile] = useState(null), [message, setMessage] = useState('Your onboarding is pending admin review.');
+  const [volume, setVolume] = useState(''), [vintage, setVintage] = useState(''), [collateral, setCollateral] = useState(''), [relationship, setRelationship] = useState(0), [scoreResult, setScoreResult] = useState(null), [scoreMessage, setScoreMessage] = useState('');
+  const upload = async e => { e.preventDefault(); if (!file) return; try { const form = new FormData(); form.append('type', type); form.append('file', file); const r = await fetch('/api/documents', { method: 'POST', headers: { Authorization: `Bearer ${session.token}` }, body: form }); if (!r.ok) throw new Error(await r.text()); setMessage(`${type} uploaded for review.`); } catch (e) { setMessage(e.message); } };
+  const submitAssessment = async e => {
+    e.preventDefault();
+    try {
+      const result = await api(`/credit/${session.tenantId}/risk-score`, session.token, { method: 'POST', body: JSON.stringify({ declaredMonthlyVolume: Number(volume), businessVintageYears: Number(vintage), collateralOffered: Number(collateral) || 0, relationshipCategoryPoints: Number(relationship) }) });
+      setScoreResult(result);
+      setScoreMessage('Submitted - an admin will see this suggestion when reviewing your credit limit.');
+    } catch (err) {
+      setScoreMessage(err.message);
+    }
+  };
+  return <><section className="card"><h2>Onboarding pending review</h2><p>{message}</p><form className="row" onSubmit={upload}><label>Document type<select value={type} onChange={e=>setType(e.target.value)}><option>GSTIN</option><option>PAN</option><option>Bank proof</option></select></label><label>Document<input type="file" required onChange={e=>setFile(e.target.files[0])}/></label><button className="primary">Upload document</button></form></section><section className="card"><h2>Credit assessment</h2><p>Tell us about your business so an admin can set an appropriate starting credit limit.</p><form className="row" onSubmit={submitAssessment}><label>Declared monthly volume (₹)<input required min="0" type="number" value={volume} onChange={e=>setVolume(e.target.value)}/></label><label>Business vintage (years)<input required min="0" type="number" value={vintage} onChange={e=>setVintage(e.target.value)}/></label><label>Collateral offered (₹)<input min="0" type="number" value={collateral} onChange={e=>setCollateral(e.target.value)}/></label><button className="primary">Submit for assessment</button></form>{scoreMessage && <p className="message">{scoreMessage}</p>}{scoreResult && <p className="message">Suggested limit: {money(scoreResult.suggestedLimitAfterCeiling)} (risk score {scoreResult.score}/10)</p>}</section></>;
+}
 function App() {
   const [session, setSession] = useState(null);
   useEffect(() => {
