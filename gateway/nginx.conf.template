@@ -4,11 +4,21 @@ server {
   index index.html;
   # Compose services can come up after Nginx. Resolve them at request time
   # instead of failing the whole gateway during its initial config parse.
-  resolver 127.0.0.11 valid=10s;
-  set $tenant_catalog http://tenant-catalog-service:8081;
-  set $orders http://order-inventory-service:8082;
-  set $credit http://credit-service:8083;
-  set $invoices http://invoice-service:8084;
+  # Also what makes this config portable beyond docker-compose: the four
+  # upstream URLs come from env vars (envsubst'd into this file by nginx's
+  # own docker-entrypoint.d/20-envsubst-on-templates.sh at container start -
+  # see the Dockerfile's ENV defaults and NGINX_ENVSUBST_FILTER), not
+  # hardcoded compose service names. Point them at each service's public
+  # URL on a host like Render and nothing else here needs to change.
+  # Docker's embedded DNS (127.0.0.11) only exists inside a Docker network -
+  # it won't exist at all on a host like Render, so this is also env-driven
+  # (set RESOLVER to a public resolver such as 8.8.8.8 there).
+  resolver ${RESOLVER} valid=10s;
+  set $tenant_catalog ${TENANT_CATALOG_URL};
+  set $orders ${ORDERS_URL};
+  set $credit ${CREDIT_URL};
+  set $invoices ${INVOICES_URL};
+  proxy_ssl_server_name on; # required for SNI when an upstream URL is https (e.g. Render); a no-op for plain http
 
   location = /api/tenants { rewrite ^/api/(.*)$ /$1 break; proxy_pass $tenant_catalog; }
   location /api/tenants/ { rewrite ^/api/(.*)$ /$1 break; proxy_pass $tenant_catalog; }
