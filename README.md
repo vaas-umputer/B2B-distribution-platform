@@ -18,6 +18,25 @@ video is coming soon. A permanent deployment with real object storage for
 documents (see [Object storage](#object-storage-current-state) below) is
 planned for later; this URL may change or go offline when that happens.
 
+### Known limitations
+
+- **Render free Postgres expires 30 days after creation** — the live
+  database (and everything in it) will be deleted around
+  **November 20, 2026** unless upgraded to a paid plan before then.
+- **No Feign timeouts configured** — a hung call from
+  `order-inventory-service` to credit/invoice service can still exhaust
+  its thread pool; flagged during the robustness pass but not yet fixed.
+- **CloudAMQP free tier caps apply** — ~1M messages/month, 20 connections.
+  Fine for a demo, not for real production traffic.
+- **The live database holds test/debug data**, not real tenants — it may
+  be reset or wiped without notice.
+- **`JWT_SECRET` is a single static shared string** with no rotation —
+  acceptable for a demo, not for production as-is.
+- **A couple of stale files remain in the repo**: `phase1-smoke-test.http`
+  / `phase3-4-e2e.http` predate the current auth flow, and
+  `dashboard/package.json` pins dependencies to `"latest"` (not a
+  reproducible build).
+
 ## Architecture
 
 ```
