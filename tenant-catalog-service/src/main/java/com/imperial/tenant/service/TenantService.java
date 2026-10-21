@@ -34,9 +34,31 @@ public class TenantService {
     @Transactional
     public Tenant onboard(String name, String username, String password, String email, String phone) {
         if (username == null || username.isBlank() || password == null || password.length() < 8) throw new IllegalArgumentException("username and password (8+ chars) are required");
+
+        // Same reason as authenticate(): findByUsername's result is gated by
+        // the tenants_self_select RLS policy's "username = current_setting
+        // ('app.login_username', ...)" clause (V2 migration). Without
+        // setting it here first, this lookup always sees zero rows - RLS
+        // hides the very duplicate we're trying to catch - so the check
+        // silently passes and the INSERT below fails instead, with an
+        // unhandled DataIntegrityViolationException (-> 500) rather than
+        // a clean "username is already taken" (-> 400).
+        entityManager.createNativeQuery("SELECT set_config('app.login_username', :username, true)")
+                .setParameter("username", username).getSingleResult();
         if (tenantRepository.findByUsername(username).isPresent()) throw new IllegalArgumentException("username is already taken");
+
         Tenant tenant = new Tenant(UUID.randomUUID(), name, username, passwordEncoder.encode(password), email, phone, TenantStatus.PENDING_REVIEW, Instant.now());
-        return tenantRepository.save(tenant);
+        try {
+            return tenantRepository.save(tenant);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // Belt-and-suspenders for the race the app-level check above
+            // can't close by itself: two concurrent onboarding requests for
+            // the same username can both pass the check above before
+            // either commits. The UNIQUE constraint is the real guarantee;
+            // this just turns its violation into the same clean error
+            // instead of a stack trace reaching the client.
+            throw new IllegalArgumentException("username is already taken");
+        }
     }
 
     @Transactional(readOnly = true)

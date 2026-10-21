@@ -10,6 +10,7 @@ import com.imperial.credit.service.CreditRiskScoreService;
 import com.imperial.credit.service.LimitIncreaseRequestService;
 import com.imperial.credit.service.OverrideBelowOutstandingException;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -62,11 +63,26 @@ public class CreditController {
         return RiskScoreView.from(creditRiskScoreService.scoreAndPersist(tenantId, data));
     }
 
-    /** Phase 2 stand-in for the admin review queue (Phase 3): the caller decides the number, this just applies it. */
+    /**
+     * Creates a tenant's FIRST credit_accounts row - the step that was
+     * missing end to end: after onboarding approval, nothing else can
+     * create this row, so without an admin-callable path here a newly
+     * approved tenant could never place an order (every lockCredit call
+     * would reject with "no credit account provisioned yet", forever).
+     * Callable by the tenant for itself (the original self-service design)
+     * OR by an admin acting on a target tenant - see requireSelfOrAdmin.
+     */
     @PostMapping("/{tenantId}/accounts")
     public CreditAccountView provision(@PathVariable UUID tenantId, @RequestBody ProvisionAccountRequest request) {
-        requireSelf(tenantId);
-        return CreditAccountView.from(creditCheckService.provisionAccount(tenantId, request.creditLimit(), "self-service"));
+        boolean isAdmin = requireSelfOrAdmin(tenantId);
+        try {
+            String setBy = isAdmin ? "admin" : "self-service";
+            return CreditAccountView.from(creditCheckService.provisionAccount(tenantId, request.creditLimit(), setBy));
+        } finally {
+            if (isAdmin) {
+                TenantContext.clear();
+            }
+        }
     }
 
     @PostMapping("/{tenantId}/recompute")
@@ -117,5 +133,27 @@ public class CreditController {
         if (!tenantId.equals(TenantContext.get())) {
             throw new ResponseStatusException(BAD_REQUEST, "tenantId does not match authenticated caller");
         }
+    }
+
+    /**
+     * Allows either the tenant acting on itself, OR an authenticated admin
+     * acting on any target tenant - same two-caller shape as
+     * overrideLimit() above. An admin's own JWT subject isn't a real
+     * tenant (see AuthController.ADMIN_PRINCIPAL_ID's Javadoc), so for an
+     * admin caller this explicitly stamps TenantContext to the PATH
+     * tenantId rather than ever comparing against the admin's own claim.
+     *
+     * @return true if the caller was an admin (and TenantContext was just
+     *         stamped, so the caller MUST clear it when done - see provision()).
+     */
+    private boolean requireSelfOrAdmin(UUID tenantId) {
+        boolean isAdmin = SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+        if (isAdmin) {
+            TenantContext.set(tenantId);
+            return true;
+        }
+        requireSelf(tenantId);
+        return false;
     }
 }

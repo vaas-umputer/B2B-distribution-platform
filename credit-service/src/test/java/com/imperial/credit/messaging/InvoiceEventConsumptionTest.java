@@ -137,6 +137,19 @@ class InvoiceEventConsumptionTest {
                         WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid)
                     """);
 
+            stmt.execute("""
+                    CREATE TABLE limit_increase_requests (
+                        id UUID PRIMARY KEY, tenant_id UUID NOT NULL, requested_amount NUMERIC NOT NULL, reason TEXT,
+                        status TEXT NOT NULL, reviewed_by TEXT, reviewed_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )""");
+            stmt.execute("ALTER TABLE limit_increase_requests ENABLE ROW LEVEL SECURITY");
+            stmt.execute("ALTER TABLE limit_increase_requests FORCE ROW LEVEL SECURITY");
+            stmt.execute("""
+                    CREATE POLICY p ON limit_increase_requests
+                        USING (tenant_id = current_setting('app.current_tenant', true)::uuid)
+                        WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid)
+                    """);
+
             stmt.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO app_user");
             stmt.execute("INSERT INTO pool_balance (id, cash) VALUES (1, 1000000)");
             stmt.execute("INSERT INTO credit_accounts (tenant_id, credit_limit) VALUES ('" + TENANT_ID + "', 500000)");

@@ -166,6 +166,18 @@ class CreditConcurrencyTest {
                         USING (tenant_id = current_setting('app.current_tenant', true)::uuid)
                         WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid)
                     """);
+            stmt.execute("""
+                    CREATE TABLE limit_increase_requests (
+                        id UUID PRIMARY KEY, tenant_id UUID NOT NULL, requested_amount NUMERIC NOT NULL, reason TEXT,
+                        status TEXT NOT NULL, reviewed_by TEXT, reviewed_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )""");
+            stmt.execute("ALTER TABLE limit_increase_requests ENABLE ROW LEVEL SECURITY");
+            stmt.execute("ALTER TABLE limit_increase_requests FORCE ROW LEVEL SECURITY");
+            stmt.execute("""
+                    CREATE POLICY limit_increase_requests_tenant_isolation ON limit_increase_requests
+                        USING (tenant_id = current_setting('app.current_tenant', true)::uuid)
+                        WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid)
+                    """);
 
             // The superuser created every table above; app_user needs
             // explicit table-level grants too - schema-level GRANT ALL

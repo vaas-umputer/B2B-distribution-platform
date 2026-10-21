@@ -4,14 +4,14 @@ import './styles.css';
 
 const api = async (path, token, options = {}) => {
   const response = await fetch(`/api${path}`, { ...options, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(options.headers || {}) } });
-  if (!response.ok) throw new Error((await response.text()) || `Request failed (${response.status})`);
+  if (!response.ok) { const err = new Error((await response.text()) || `Request failed (${response.status})`); err.status = response.status; throw err; }
   return response.status === 204 ? null : response.json();
 };
 const money = value => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value || 0);
 
 function Login({ onLogin }) {
   const [mode, setMode] = useState('dealer'), [signup, setSignup] = useState(false), [username, setUsername] = useState('admin'), [password, setPassword] = useState('admin-dev-secret-CHANGE-ME'), [name, setName] = useState(''), [email, setEmail] = useState(''), [phone, setPhone] = useState(''), [error, setError] = useState('');
-  const submit = async e => { e.preventDefault(); try { if (signup) { await api('/tenants', null, { method: 'POST', body: JSON.stringify({ name, username, password, email, phone }) }); setError('Signup submitted. An admin must approve your onboarding before you can sign in.'); setSignup(false); return; } const data = await api(mode === 'admin' ? '/auth/admin-login' : '/auth/login', null, { method: 'POST', body: JSON.stringify({ username, password }) }); const claims = JSON.parse(atob(data.token.split('.')[1])); onLogin({ token: data.token, role: mode.toUpperCase(), tenantId: claims.tenant_id }); } catch (err) { setError(err.message); } };
+  const submit = async e => { e.preventDefault(); try { if (signup) { await api('/tenants', null, { method: 'POST', body: JSON.stringify({ name, username, password, email, phone }) }); setError('Signup submitted. An admin must approve your onboarding before you can sign in.'); setSignup(false); return; } const data = await api(mode === 'admin' ? '/auth/admin-login' : '/auth/login', null, { method: 'POST', body: JSON.stringify({ username, password }) }); const claims = JSON.parse(atob(data.token.split('.')[1])); onLogin({ token: data.token, role: mode.toUpperCase(), tenantId: claims.sub }); } catch (err) { setError(err.message); } };
   return <main className="login"><section className="card"><h1>Imperial Distribution</h1><p>{signup ? 'Agent onboarding' : 'Distribution operations portal'}</p>{!signup && <div className="tabs"><button className={mode === 'dealer' ? 'active' : ''} onClick={() => setMode('dealer')}>Dealer</button><button className={mode === 'admin' ? 'active' : ''} onClick={() => setMode('admin')}>Admin</button></div>}<form onSubmit={submit}>{signup && <><label>Business name<input required value={name} onChange={e => setName(e.target.value)} /></label><label>Contact email<input type="email" required value={email} onChange={e => setEmail(e.target.value)} /></label><label>Phone<input value={phone} onChange={e => setPhone(e.target.value)} /></label></>}<label>Username<input required value={username} onChange={e => setUsername(e.target.value)} /></label><label>Password<input required minLength="8" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={signup ? 'At least 8 characters' : ''} /></label><button className="primary">{signup ? 'Submit for review' : 'Sign in'}</button>{!signup && mode === 'dealer' && <button type="button" onClick={() => { setSignup(true); setUsername(''); setPassword(''); }}>Create agent account</button>}{signup && <button type="button" onClick={() => setSignup(false)}>Back to sign in</button>}{error && <p className={error.startsWith('Signup') ? 'message' : 'error'}>{error}</p>}</form></section></main>;
 }
 
@@ -28,7 +28,25 @@ function Admin({ session }) {
   const refresh = async () => { try { const [utilization, alerts, requests, onboarding, report] = await Promise.all([api('/admin/utilization', session.token), api('/admin/alerts', session.token), api('/admin/limit-increase-requests?status=PENDING', session.token), api('/admin/onboarding', session.token), api('/admin/reports/monthly/latest', session.token).catch(() => null)]); setData({ utilization, alerts, requests, onboarding, report }); } catch (e) { setMessage(e.message); } };
   useEffect(() => { refresh(); }, []);
   const decide = async (id, action) => { try { await api(`/admin/limit-increase-requests/${id}/${action}`, session.token, { method: 'POST' }); refresh(); } catch (e) { setMessage(e.message); } };
-  const override = async e => { e.preventDefault(); try { await api(`/credit/${tenantId}/limit`, session.token, { method: 'PATCH', body: JSON.stringify({ newLimit: Number(newLimit), overrideReason: reason }) }); setMessage('Credit limit updated.'); refresh(); } catch (err) { setMessage(err.message); } };
+  const override = async e => {
+    e.preventDefault();
+    try {
+      // PATCH .../limit enforces the never-below-outstanding safeguard but
+      // only works once an account already exists; a brand-new tenant has
+      // none yet (nothing else can create the first row), so a 404 here
+      // means "provision instead", not a real failure.
+      try {
+        await api(`/credit/${tenantId}/limit`, session.token, { method: 'PATCH', body: JSON.stringify({ newLimit: Number(newLimit), overrideReason: reason }) });
+      } catch (err) {
+        if (err.status !== 404) throw err;
+        await api(`/credit/${tenantId}/accounts`, session.token, { method: 'POST', body: JSON.stringify({ creditLimit: Number(newLimit) }) });
+      }
+      setMessage('Credit limit updated.');
+      refresh();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  };
   const reviewOnboarding = async (id, action) => { try { await api(`/admin/onboarding/${id}/${action}`, session.token, { method: 'POST', body: JSON.stringify({ note: 'Reviewed in admin dashboard' }) }); setMessage(`Onboarding ${action}d.`); refresh(); } catch (e) { setMessage(e.message); } };
   const outstanding = data.utilization.reduce((sum, x) => sum + Number(x.outstanding), 0), limit = data.utilization.reduce((sum, x) => sum + Number(x.creditLimit), 0);
   return <>{message && <p className="message">{message}</p>}<section className="metrics"><Metric title="Pool utilization" value={limit ? `${Math.round(outstanding / limit * 100)}%` : '—'} /><Metric title="Near-limit alerts" value={data.alerts.length} /><Metric title="Pending requests" value={data.requests.length} /><Metric title="Pending onboarding" value={data.onboarding.length} /></section><section className="card"><h2>Onboarding review</h2><Table headers={['Business', 'Username', 'Email', 'Actions']} rows={data.onboarding.map(a => [a.name, a.username, a.email, <span><button onClick={() => reviewOnboarding(a.id, 'approve')}>Approve</button><button className="danger" onClick={() => reviewOnboarding(a.id, 'reject')}>Reject</button></span>])}/></section><section className="card"><h2>Tenant utilization</h2><Table headers={['Tenant', 'Credit limit', 'Outstanding', 'Utilization', 'Status']} rows={data.utilization.map(x => [x.tenantId.slice(0, 8), money(x.creditLimit), money(x.outstanding), `${x.creditLimit ? Math.round(x.outstanding / x.creditLimit * 100) : 0}%`, x.throttled ? 'Throttled' : 'Active'])}/></section><section className="two"><section className="card"><h2>Near-limit alerts</h2><Table headers={['Tenant', 'Utilization']} rows={data.alerts.map(a => [a.tenantId.slice(0, 8), `${a.utilization}%`])}/></section><section className="card"><h2>Pending credit requests</h2><Table headers={['Tenant', 'Amount', 'Actions']} rows={data.requests.map(r => [r.tenantId.slice(0, 8), money(r.requestedAmount), <span><button onClick={() => decide(r.id, 'approve')}>Approve</button><button className="danger" onClick={() => decide(r.id, 'reject')}>Reject</button></span>])}/></section></section><section className="card"><h2>Manual credit override</h2><form className="row" onSubmit={override}><label>Tenant ID<input required value={tenantId} onChange={e => setTenantId(e.target.value)} /></label><label>New limit<input required min="0" type="number" value={newLimit} onChange={e => setNewLimit(e.target.value)} /></label><label>Reason<input required value={reason} onChange={e => setReason(e.target.value)} /></label><button className="primary">Apply override</button></form></section></>;
