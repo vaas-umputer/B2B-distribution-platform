@@ -70,7 +70,33 @@ function Dealer({ session }) {
 
 function Admin({ session }) {
   const [data, setData] = useState({ utilization: [], alerts: [], requests: [], onboarding: [], tenants: [], report: null }), [message, setMessage] = useState(''), [tenantId, setTenantId] = useState(''), [newLimit, setNewLimit] = useState(''), [reason, setReason] = useState(''), [submitting, setSubmitting] = useState(false), [suggestion, setSuggestion] = useState(null);
-  const refresh = async () => { try { const [utilization, alerts, requests, onboarding, tenants, report] = await Promise.all([api('/admin/utilization', session.token), api('/admin/alerts', session.token), api('/admin/limit-increase-requests?status=PENDING', session.token), api('/admin/onboarding', session.token), api('/admin/onboarding?status=ACTIVE', session.token), api('/admin/reports/monthly/latest', session.token).catch(() => null)]); setData({ utilization: utilization || [], alerts: alerts || [], requests: requests || [], onboarding: onboarding || [], tenants: tenants || [], report }); } catch (e) { setMessage(e.message); } };
+  const refresh = async () => {
+    // Promise.all previously meant ONE slow/cold-starting backend call
+    // (e.g. a Render free-tier service that just spun down) rejected the
+    // whole batch, blanking every section of the dashboard - including
+    // the ones that succeeded fine - and showing a raw error blob.
+    // allSettled lets each section degrade independently instead.
+    const [utilization, alerts, requests, onboarding, tenants, report] = await Promise.allSettled([
+      api('/admin/utilization', session.token),
+      api('/admin/alerts', session.token),
+      api('/admin/limit-increase-requests?status=PENDING', session.token),
+      api('/admin/onboarding', session.token),
+      api('/admin/onboarding?status=ACTIVE', session.token),
+      api('/admin/reports/monthly/latest', session.token),
+    ]);
+    const value = (r, fallback) => r.status === 'fulfilled' ? (r.value ?? fallback) : fallback;
+    setData({
+      utilization: value(utilization, []),
+      alerts: value(alerts, []),
+      requests: value(requests, []),
+      onboarding: value(onboarding, []),
+      tenants: value(tenants, []),
+      report: value(report, null), // a rejected report fetch is usually just "no report compiled yet" - stay quiet about it
+    });
+    const failedNames = [['utilization', utilization], ['alerts', alerts], ['pending requests', requests], ['onboarding', onboarding], ['tenants', tenants]]
+      .filter(([, r]) => r.status === 'rejected').map(([name]) => name);
+    if (failedNames.length) setMessage(`Failed to load: ${failedNames.join(', ')} - retry shortly.`);
+  };
   useEffect(() => { refresh(); }, []);
   const decide = async (id, action) => { try { await api(`/admin/limit-increase-requests/${id}/${action}`, session.token, { method: 'POST' }); refresh(); } catch (e) { setMessage(e.message); } };
   const idToUsername = id => data.tenants.find(t => t.id === id)?.username || id.slice(0, 8);
